@@ -1,37 +1,9 @@
 from flask import Blueprint,render_template, jsonify,request
-import psycopg
-from psycopg.rows import dict_row
-import os
+from app.db import get_db_connection 
 
 
 tasks_bp = Blueprint("tasks",__name__)
-
-tasks = [
-{
-    "id": 1,
-    "title": "Learn Flask",
-    "status": "todo"
-},
-{
-    "id": 2,
-    "title": "Build TaskHub",
-    "status": "in_progress"
-}
-]
-allowed_status =["todo","in_progress","done"]
-
-def get_db_connection():
-    return psycopg.connect(
-        host="127.0.0.1",
-        port=5432,
-        dbname="taskhub",
-        user="taskhub_user",
-        password=os.environ["TASKHUB_DB_PASSWORD"],
-        row_factory=dict_row
-    )
-
-
-
+allowed_status =["todo", "in_progress","done"]
 @tasks_bp.route("/tasks", methods=["GET"])
 def get_tasks():
     with get_db_connection() as conn:
@@ -55,11 +27,11 @@ def get_task(task_id):
 @tasks_bp.route("/tasks",methods=["POST"])
 def post_task():
     data = request.get_json()
-    title = data.get("title")
-    status = data.get('status')
+   
     if not isinstance(data, dict) or not isinstance(data.get("title"),str ):
         return jsonify({"error": "JSON object required"}), 400
-   
+    title = data.get("title")
+    status = data.get('status')
     
     if not data.get("title").strip() or data.get("status") not in allowed_status:
 
@@ -77,12 +49,12 @@ def post_task():
 def update_task(task_id):
     data = request.get_json()
 
-    title = data.get("title")
-    status = data.get("status")
+    
 
     if not isinstance(title,str) or not title.strip() :
         return jsonify("bad request"),400
-
+    title = data.get("title")
+    status = data.get("status")
     if status not in allowed_status:
         return jsonify("bad request"),400
     
@@ -109,10 +81,10 @@ def update_task(task_id):
 def delete_task(task_id):
     with get_db_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute("DELETE FROM tasks WHERE id = %s RETURNING id, title,status",(task_id,))
+            cur.execute("DELETE FROM tasks WHERE id = %s RETURNING id",(task_id,))
             deleted_task = cur.fetchone()
     if deleted_task is None:
-        return jsonify({"error":"not found"},404)
-    return jsonify(deleted_task),204
+        return jsonify({"error":"not found"}),404
+    return "",204
 
   
