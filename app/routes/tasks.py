@@ -1,6 +1,6 @@
 from flask import Blueprint,render_template, jsonify,request
 from app.db import get_db_connection 
-
+from app.auth_utils import jwt_required
 
 tasks_bp = Blueprint("tasks",__name__)
 allowed_status =["todo", "in_progress","done"]
@@ -27,36 +27,83 @@ def validate_task_data(data):
      
 
 @tasks_bp.route("/tasks", methods=["GET"])
+@jwt_required
 def get_tasks():
-    sort = request.args.get("sort")
-    status = request.args.get("status")    
-    page = request.args.get("page", default = 1, type=int)
-    limit = request.args.get("limit", default = 10, type=int)
-    if sort not in ("asc","desc"):
-         return jsonify({"error":"Invalid sort"}),400
-    order = "ASC" if sort =="asc" else "DESC"
-        
+    sort = request.args.get("sort", default="asc")
+    status = request.args.get("status")
+    page = request.args.get("page", default=1, type=int)
+    limit = request.args.get("limit", default=10, type=int)
+
+    # 排序白名单验证
+    if sort not in ("asc", "desc"):
+        return jsonify({"error": "Invalid sort"}), 400
+
+    # 状态白名单验证
+    if status is not None and status not in ("todo", "in_progress", "done"):
+        return jsonify({"error": "Invalid status"}), 400
+
+    # 分页参数验证
     if page < 1:
-            return jsonify({"error":"bad request"}),400
+        return jsonify({"error": "Invalid page"}), 400
+
     if limit < 1 or limit > 100:
-            return jsonify({"error":"bad request"}),400
-    offset = (page-1)*limit
+        return jsonify({"error": "Invalid limit"}), 400
+
+    order = "ASC" if sort == "asc" else "DESC"
+    offset = (page - 1) * limit
+
     with get_db_connection() as conn:
         with conn.cursor() as cur:
-            
+
+            # 查询任务
             if status is not None:
-           
-                cur.execute(f"SELECT * FROM tasks WHERE status = %s ORDER BY id {order}",(status,))
+                cur.execute(
+                    f"""
+                    SELECT * FROM tasks
+                    WHERE status = %s
+                    ORDER BY id {order}
+                    LIMIT %s OFFSET %s
+                    """,
+                    (status, limit, offset)
+                )
             else:
-                 cur.execute(f"SELECT * FROM tasks ORDER BY id {order} LIMIT %s OFFSET %s",(limit,offset))
+                cur.execute(
+                    f"""
+                    SELECT * FROM tasks
+                    ORDER BY id {order}
+                    LIMIT %s OFFSET %s
+                    """,
+                    (limit, offset)
+                )
+
             tasks = cur.fetchall()
-            cur.execute("SELECT COUNT(status) AS total FROM tasks" )
+
+            # 统计符合条件的任务总数
+            if status is not None:
+                cur.execute(
+                    "SELECT COUNT(*) AS total FROM tasks WHERE status = %s",
+                    (status,)
+                )
+            else:
+                cur.execute(
+                    "SELECT COUNT(*) AS total FROM tasks"
+                )
+
             result = cur.fetchone()
             total = result["total"]
-            total_pages= (total+limit-1)//limit
-    return jsonify({"tasks":tasks,"page":page, "limit": limit, "total":total,"total_pages":total_pages}),200
+
+            total_pages = (total + limit - 1) // limit
+
+    return jsonify({
+        "tasks": tasks,
+        "page": page,
+        "limit": limit,
+        "total": total,
+        "total_pages": total_pages
+    }), 200
 
 @tasks_bp.route("/tasks/<int:task_id>", methods=["GET"])
+@jwt_required
 def get_task(task_id):
     with get_db_connection() as conn:
         with conn.cursor() as cur:
@@ -69,12 +116,13 @@ def get_task(task_id):
 
 
 @tasks_bp.route("/tasks",methods=["POST"])
+@jwt_required
 def post_task():
-    data = request.get_json()
+    data = request.get_json(silent=True)
     task_data,error = validate_task_data(data)
    
     if error:
-         return jsonify({"error":"error"}),400
+         return jsonify({"error":error}),400
     
     title = task_data["title"]
     status = task_data['status']
@@ -88,12 +136,13 @@ def post_task():
 
 
 @tasks_bp.route("/tasks/<int:task_id>", methods=["PUT"])
+@jwt_required
 def update_task(task_id):
-    data = request.get_json()
+    data = request.get_json(silent=True)
     task_data,error = validate_task_data(data)
 
     if error:
-         return jsonify({"error":"error"}),400
+         return jsonify({"error":error}),400
 
     
     title = task_data["title"]
@@ -117,6 +166,7 @@ def update_task(task_id):
     return jsonify(updated_task),200
 
 @tasks_bp.route("/tasks/<int:task_id>", methods=["PATCH"])
+@jwt_required
 def patch_task(task_id):
     data= request.get_json(silent=True)
 
@@ -158,6 +208,7 @@ def patch_task(task_id):
 
 
 @tasks_bp.route("/tasks/<int:task_id>", methods=["DELETE"])
+@jwt_required
 def delete_task(task_id):
     with get_db_connection() as conn:
         with conn.cursor() as cur:
